@@ -1,108 +1,135 @@
-**Purpose**
-This is a Flask 3 proof-of-concept for a legacy credit-bureau workflow. It is also designed as a baseline for migrating to FastAPI.
+# Credit Bureau Flask POC
 
-The main workflow is:
+A runnable Flask 3 reference application intended to be the legacy source for a later FastAPI migration.
 
-Customer → mock bureau response → credit report → Pandas risk assessment → audit log
+## Included
+- Flask application factory and Blueprints
+- Customer CRUD (create, list, get)
+- SQLAlchemy 2.x models and relationships
+- Flask-Migrate / Alembic configuration
+- JWT login for protected demo endpoints
+- Pandas-based synthetic risk calculation
+- Local mock credit-bureau adapter
+- Audit logging and health endpoint
+- Pytest unit, API, integration, migration-smoke and regression tests
+- Docker Compose with PostgreSQL
 
-**Application structure**
-app/init.py: Flask application factory.
-app/config.py: Environment-based database, JWT, and bureau settings.
-app/routes/: HTTP endpoints and JWT enforcement.
-app/services/: Business orchestration.
-app/repositories/: SQLAlchemy database operations.
-app/models/: Database entities.
-app/processing/: Pandas-based risk calculations.
-app/integrations/transunion_mock/: Deterministic mock bureau adapter.
-app/schemas/: Manual request validation.
-tests/: Unit, API, integration, migration, regression, and performance tests.
+## 1. Create environment
 
-**Database entities**
-Customer: name, email, PAN, timestamps.
-CreditReport: bureau reference, credit score, bureau attributes, raw JSON response.
-RiskAssessment: one assessment per credit report.
-AuditLog: success/failure credit-check events.
-Relationships are implemented in app/models/customer.py, app/models/credit_report.py, app/models/risk_assessment.py, and app/models/audit_log.py.
+Python 3.12 is recommended.
 
-**API flow**
-Customer APIs
-Registered under /api/customers:
-
-POST /api/customers
-GET /api/customers
-GET /api/customers/{id}
-The customer route validates name, email, and PAN format before calling the customer service. app/routes/customer_routes.py
-
-**Authentication**
-POST /api/auth/login accepts hardcoded POC credentials and returns a JWT:
-
-Username: poc_user
-Password: poc_password_change_me
-Protected endpoints use @jwt_required().
-
-See app/routes/auth_routes.py.
-
-Credit check
-POST /api/credit-check:
-
-Validates customer_id.
-Loads the customer.
-Calls MockBureauClient.
-Persists a CreditReport.
-Calculates a risk score.
-Persists a RiskAssessment.
-Writes a success or failure audit record.
-The transaction and rollback behavior live in app/services/credit_service.py.
-
-GET /api/credit-reports/{id} retrieves a stored report and its optional assessment.
-
-**Risk analysis**
-POST /api/risk-analysis accepts a list of records and calculates:
-
-Risk score = 40% payment history + 30% credit utilization + 30% loan history
-LOW: score ≥ 750
-MEDIUM: score ≥ 650
-HIGH: below 650
-See app/processing/pandas_processor.py.
-
-**Health**
-GET /health executes SELECT 1 to verify database connectivity.
-
-**Persistence**
-Default development storage is SQLite:
-sqlite:///credit_bureau.db
-
-Docker Compose provides PostgreSQL 16 with the application exposed on port 5000. The Compose startup runs:
-
-
-Database configuration is in app/config.py, with deployment in docker-compose.yml.
-flask db upgrade
-python run.py
-
-Important separation of concerns
-Routes do HTTP validation and responses.
-Services coordinate business operations.
-Repositories interact with SQLAlchemy.
-
-**How to run**
-cd credit_bureau_flask_poc
-
-python -m venv venv
-
-# Windows
-venv\Scripts\activate
+```bash
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
 
 pip install -r requirements.txt
+```
 
-copy .env.example .env
+Copy `.env.example` to `.env` and update secrets. SQLite is the default for a quick local run.
 
+## 2. Initialize database migrations
+
+```bash
 flask db init
-flask db migrate -m "initial schema"
+flask db migrate -m "initial credit bureau schema"
 flask db upgrade
+```
 
+The `migrations/` directory is included as the location for generated Alembic revisions. The first migration revision is generated in your environment using the installed dependency versions.
 
-python -m scripts.seed_database
+Seed a demo customer:
 
+```bash
+python scripts/seed_database.py
+```
+
+## 3. Run the Flask app
+
+```bash
 python run.py
+```
 
+Base URL: `http://localhost:5000`
+
+## 4. Try the API
+
+### Health
+```bash
+curl http://localhost:5000/health
+```
+
+### Create customer
+```bash
+curl -X POST http://localhost:5000/api/customers \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Rahul Sharma","email":"rahul@example.com","pan_number":"ABCDE1234F"}'
+```
+
+### Login and get JWT
+```bash
+curl -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"poc_user","password":"poc_password_change_me"}'
+```
+
+Copy `access_token` from the response.
+
+### Run credit check
+```bash
+curl -X POST http://localhost:5000/api/credit-check \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -d '{"customer_id":1}'
+```
+
+### Run risk analysis
+```bash
+curl -X POST http://localhost:5000/api/risk-analysis \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -d '{"records":[{"payment_history":800,"credit_utilization":700,"loan_history":750}]}'
+```
+
+## 5. Run tests
+
+```bash
 pytest -v
+pytest --cov=app --cov-report=term-missing
+```
+
+## 6. Run with PostgreSQL using Docker
+
+```bash
+docker compose up --build
+```
+
+The API is exposed on port 5000 and PostgreSQL on port 5432. For a production-quality Compose setup, add a database health check and wait-for-ready behavior before running migrations.
+
+## API endpoints
+
+| Method | Endpoint | Auth |
+|---|---|---|
+| POST | `/api/auth/login` | No |
+| POST | `/api/customers` | No (POC) |
+| GET | `/api/customers` | No (POC) |
+| GET | `/api/customers/{id}` | No (POC) |
+| POST | `/api/credit-check` | JWT |
+| GET | `/api/credit-reports/{id}` | JWT |
+| POST | `/api/risk-analysis` | JWT |
+| GET | `/health` | No |
+
+## POC-only security notes
+
+- Demo login credentials are hardcoded. Do not use this authentication implementation outside a local demonstration.
+- Change all secrets before use.
+- PAN is sensitive personal data. This sample stores synthetic PAN-like values in plaintext for demonstration only. A real system needs consent, encryption/tokenization, masking, access controls, retention rules and audit controls.
+- The mock bureau adapter returns deterministic synthetic values. It does not contact TransUnion.
+- The weighted Pandas score is illustrative only and is not a validated lending or credit decision model.
+- Do not send real customer data to this POC.
+
+## Migration notes
+
+This app intentionally keeps Pandas processing, services, repositories and SQLAlchemy models outside the Flask routes. That separation makes them easier to reuse when the HTTP layer is migrated to FastAPI.

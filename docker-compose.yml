@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: credit_bureau
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    environment:
+      SECRET_KEY: local-dev-secret-change-me
+      JWT_SECRET_KEY: local-jwt-secret-change-me
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/credit_bureau
+      BUREAU_MODE: mock
+    ports:
+      - "5000:5000"
+    depends_on:
+      - db
+    command: sh -c "flask db upgrade && python run.py"
+
+volumes:
+  postgres_data:
